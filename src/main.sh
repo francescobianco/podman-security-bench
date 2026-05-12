@@ -1,40 +1,11 @@
-#!/bin/bash
-# --------------------------------------------------------------------------------------------
-# Podman Bench for Security
-#
-# Based off of Docker Bench for security
-#   Docker, Inc. (c) 2015-2021
-#
-# Checks for dozens of common best-practices around deploying Podman containers in production.
-# --------------------------------------------------------------------------------------------
+module output
+module helper
+module functions
+module tests
 
-version='1.0.0'
+VERSION='1.0.0'
 
-# Load dependencies
-. ./functions/functions_lib.sh
-. ./functions/helper_lib.sh
-
-# Setup the paths
-this_path=$(abspath "$0")       ## Path of this file including filename
-myname=$(basename "${this_path%.*}")     ## file name of this script.
-
-# default path to allow files
-lists_path=default-lists
-
-readonly version
-readonly this_path
-readonly myname
-
-export PATH="$PATH:/bin:/sbin:/usr/bin:/usr/local/bin:/usr/sbin/"
-
-# Check for required program(s)
-req_programs 'awk podman grep stat tee tail wc xargs truncate sed skopeo jq'
-
-# Ensure podman works
-if ! podman ps -q >/dev/null 2>&1; then
-  printf "Error executing podman (does podman ps work?)\n"
-  exit 1
-fi
+readonly VERSION
 
 usage () {
   cat <<EOF
@@ -42,15 +13,15 @@ Podman Bench for Security - Podman, Inc. (c) 2015-$(date +"%Y")
 Checks for dozens of common best-practices around deploying Podman containers in production.
 Based on the CIS Podman Benchmark 1.3.1.
 
-Usage: ${myname}.sh [OPTIONS]
+Usage: podman-security-bench.sh [OPTIONS]
 
 Example:
   - Only run check "2.2 - Ensure the logging level is set to 'info'":
-      bash podman-bench-security.sh -c check_2_2
+      bash podman-security-bench.sh -c check_2_2
   - Run all available checks except the host_configuration group and "2.8 - Enable user namespace support":
-      bash podman-bench-security.sh -e host_configuration,check_2_8
+      bash podman-security-bench.sh -e host_configuration,check_2_8
   - Run just the container_images checks except "4.5 - Ensure Content trust for Podman is Enabled":
-      bash podman-bench-security.sh -c container_images -e check_4_5
+      bash podman-security-bench.sh -c container_images -e check_4_5
 
 Options:
   -b           optional  Do not print colors
@@ -70,67 +41,85 @@ Released under the Apache-2.0 License. <https://github.com/containers/podman-sec
 EOF
 }
 
-# Default values
-if [ ! -d log ]; then
-  mkdir log
-fi
-
-logger="log/${myname}.log"
-limit=0
-printremediation="0"
-globalRemediation=""
-
-# Get the flags
-# If you add an option here, please
-# remember to update usage() above.
-while getopts bhl:u:c:e:i:x:t:n:p:w: args
-do
-  case $args in
-  b) nocolor="nocolor";;
-  h) usage; exit 0 ;;
-  l) logger="$OPTARG" ;;
-  c) check="$OPTARG" ;;
-  e) checkexclude="$OPTARG" ;;
-  i) include="$OPTARG" ;;
-  x) exclude="$OPTARG" ;;
-  n) limit="$OPTARG" ;;
-  p) printremediation="1" ;;
-  w) lists_path="$OPTARG" ;;
-  *) usage; exit 1 ;;
-  esac
-done
-
-export LISTS_PATH="$lists_path"
-
-# Load output formatting
-. ./functions/output_lib.sh
-
-yell_info
-yell "Path to allow files set to: $(realpath "$LISTS_PATH")"
-
-# Warn if not root
-if [ "$(id -u)" != "0" ]; then
-  warn "$(yell 'Some tests might require root to run')\n"
-  sleep 3
-fi
-
-# Total Score
-# Warn Scored -1, Pass Scored +1, Not Score -0
-
-totalChecks=0
-currentScore=0
-
-logit "Initializing $(date +%Y-%m-%dT%H:%M:%S%:z)\n"
-beginjson "$version" "$(date +%s)"
-
-# Load all the tests from tests/ and run them
 main () {
+  local this_path
+  local myname
+  local lists_path
+  local logger
+  local limit
+  local printremediation
+  local nocolor
+  local check
+  local checkexclude
+  local include
+  local exclude
+  local containers
+  local images
+  local benchcont
+  local benchimagecont
+  local totalChecks
+  local currentScore
+  local globalRemediation
+
+  this_path=$(abspath "$0")
+  myname=$(basename "${this_path%.*}")
+  lists_path="default-lists"
+
+  export PATH="$PATH:/bin:/sbin:/usr/bin:/usr/local/bin:/usr/sbin/"
+
+  req_programs 'awk podman grep stat tee tail wc xargs truncate sed skopeo jq'
+
+  if ! podman ps -q >/dev/null 2>&1; then
+    printf "Error executing podman (does podman ps work?)\n"
+    exit 1
+  fi
+
+  if [ ! -d log ]; then
+    mkdir log
+  fi
+
+  logger="log/${myname}.log"
+  limit=0
+  printremediation="0"
+  globalRemediation=""
+
+  while getopts bhl:u:c:e:i:x:t:n:p:w: args
+  do
+    case $args in
+    b) nocolor="nocolor";;
+    h) usage; exit 0 ;;
+    l) logger="$OPTARG" ;;
+    c) check="$OPTARG" ;;
+    e) checkexclude="$OPTARG" ;;
+    i) include="$OPTARG" ;;
+    x) exclude="$OPTARG" ;;
+    n) limit="$OPTARG" ;;
+    p) printremediation="1" ;;
+    w) lists_path="$OPTARG" ;;
+    *) usage; exit 1 ;;
+    esac
+  done
+
+  export LISTS_PATH="$lists_path"
+
+  yell_info
+  yell "Path to allow files set to: $(realpath "$LISTS_PATH")"
+
+  if [ "$(id -u)" != "0" ]; then
+    warn "$(yell 'Some tests might require root to run')\n"
+    sleep 3
+  fi
+
+  totalChecks=0
+  currentScore=0
+
+  logit "Initializing $(date +%Y-%m-%dT%H:%M:%S%:z)\n"
+  beginjson "$VERSION" "$(date +%s)"
+
   logit "\n${bldylw}Section A - Check results${txtrst}"
 
-  # Get configuration location
   get_podman_configuration_file
 
-  # If there is a container with label podman_bench_security, memorize it:
   benchcont="nil"
   for c in $(podman ps --quiet); do
     if podman inspect --format '{{ .Config.Labels }}' "$c" | \
@@ -139,7 +128,6 @@ main () {
     fi
   done
 
-  # Get the image id of the podman_bench_security_image, memorize it:
   benchimagecont="nil"
   for c in $(podman images --quiet); do
     if podman inspect --format '{{ .Config.Labels }}' "$c" | \
@@ -149,10 +137,12 @@ main () {
   done
 
   if [ -n "$include" ]; then
+    local pattern
     pattern=$(echo "$include" | sed 's/,/|/g')
     containers=$(podman ps --quiet | grep -v "$benchcont" | grep -E "$pattern")
     images=$(podman images --noheading | grep -E "$pattern" | awk '{print $3}' | grep -v "$benchimagecont")
   elif [ -n "$exclude" ]; then
+    local pattern
     pattern=$(echo "$exclude" | sed 's/,/|/g')
     containers=$(podman ps --quiet | grep -v "$benchcont" | grep -Ev "$pattern")
     images=$(podman images --noheading | grep -Ev "$pattern" | awk '{print $3}' | grep -v "$benchimagecont")
@@ -161,16 +151,10 @@ main () {
     images=$(podman images --quiet | grep -v "$benchimagecont")
   fi
 
-  for test in tests/*.sh; do
-    . ./"$test"
-  done
-
   if [ -z "$check" ] && [ ! "$checkexclude" ]; then
-    # No options just run
     cis
   elif [ -z "$check" ]; then
-    # No check defined but excludes defined set to calls in cis() function
-    check=$(sed -ne "/cis() {/,/}/{/{/d; /}/d; p}" functions/functions_lib.sh)
+    check=$(sed -ne "/cis() {/,/}/{/{/d; /}/d; p}" src/functions.sh)
   fi
 
   for c in $(echo "$check" | sed "s/,/ /g"); do
@@ -179,26 +163,23 @@ main () {
       continue
     fi
     if [ -z "$checkexclude" ]; then
-      # No excludes just run the checks specified
       "$c"
     else
-      # Exludes specified and check exists
+      local checkexcluded
       checkexcluded="$(echo ",$checkexclude" | sed -e 's/^/\^/g' -e 's/,/\$|/g' -e 's/$/\$/g')"
 
       if echo "$c" | grep -E "$checkexcluded" 2>/dev/null 1>&2; then
-        # Excluded
         continue
       elif echo "$c" | grep -vE 'check_[0-9]|check_[a-z]' 2>/dev/null 1>&2; then
-        # Function not a check, fill loop_checks with all check from function
-        loop_checks="$(sed -ne "/$c() {/,/}/{/{/d; /}/d; p}" functions/functions_lib.sh)"
+        local loop_checks
+        loop_checks="$(sed -ne "/$c() {/,/}/{/{/d; /}/d; p}" src/functions.sh)"
       else
-        # Just one check
+        local loop_checks
         loop_checks="$c"
       fi
 
       for lc in $loop_checks; do
         if echo "$lc" | grep -vE "$checkexcluded" 2>/dev/null 1>&2; then
-          # Not excluded
           "$lc"
         fi
       done
