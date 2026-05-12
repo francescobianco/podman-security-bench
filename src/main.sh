@@ -1,7 +1,6 @@
 module output
 module helper
 module functions
-module tests
 
 VERSION='1.0.0'
 
@@ -150,6 +149,10 @@ main () {
     containers=$(podman ps --quiet | grep -v "$benchcont")
     images=$(podman images --quiet | grep -v "$benchimagecont")
   fi
+
+  for test in tests/*.sh; do
+    . ./"$test"
+  done
 
   if [ -z "$check" ] && [ ! "$checkexclude" ]; then
     cis
