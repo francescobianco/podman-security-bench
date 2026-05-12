@@ -1,6 +1,6 @@
 # Podman Security Tests
 
-![Podman Security Tests running](img/benchmark_log.png)
+![Podman Security Tests running](.github/assets/img/benchmark_log.png)
 
 Podman Security is a script that checks for dozens of common best-practices around deploying Podman containers in production. The tests are all automated, and are based on the [CIS Docker Benchmark v1.3.1](https://www.cisecurity.org/benchmark/docker/).
 

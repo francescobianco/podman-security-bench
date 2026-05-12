@@ -1,0 +1,8 @@
+public 1_host_configuration
+public 2_podman_configuration
+public 3_podman_configuration_files
+public 4_container_images
+public 5_container_runtime
+public 6_podman_security_operations
+public 8_podman_enterprise_configuration
+public 99_community_checks
